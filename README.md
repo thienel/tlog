@@ -80,7 +80,8 @@ childLogger.Info("This log will always have service field")
 type Config struct {
     Environment   string          // "development" | "production"
     Level         string          // "debug" | "info" | "warn" | "error"
-    AppName       string          // Logger name in structured logs
+    AppName       string          // Service identifier in logs
+    Version       string          // Application version in logs
     
     // Console output
     EnableConsole bool            // Enable stdout output
@@ -103,7 +104,8 @@ type Config struct {
 |--------|---------|-------------|
 | `Environment` | `"development"` | Log format (`development`=colored console, `production`=JSON) |
 | `Level` | `"info"` | Minimum log level (`debug`, `info`, `warn`, `error`) |
-| `AppName` | `"app"` | Logger name in structured logs |
+| `AppName` | `"app"` | Service identifier in logs (`service` field) |
+| `Version` | `"1.0.0"` | Application version in logs (`version` field) |
 | `EnableConsole` | `true` | Enable stdout output |
 | `EnableFile` | `false` | Enable file output |
 | `FilePath` | `"logs/app.log"` | Log file path |
@@ -136,14 +138,16 @@ Output:
 ```go
 cfg := tlog.DefaultConfig().
     WithEnvironment("production").
-    WithLevel("info")
+    WithLevel("info").
+    WithAppName("my-service").
+    WithVersion("2.0.1")
 
 tlog.Init(cfg)
 ```
 
 Output:
 ```json
-{"timestamp":"2024-12-27T15:04:05.123+07:00","level":"INFO","caller":"main.go:10","message":"Application started","port":8080}
+{"timestamp":"2024-12-27T15:04:05.123+07:00","level":"INFO","caller":"main.go:10","message":"Application started","service":"my-service","version":"2.0.1","port":8080}
 ```
 
 #### With File Output
@@ -153,6 +157,7 @@ cfg := tlog.DefaultConfig().
     WithEnvironment("production").
     WithLevel("debug").
     WithAppName("my-api").
+    WithVersion("1.2.3").
     WithFile("logs/app.log").
     WithFileRotation(100, 5, 7, true)  // 100MB, 5 backups, 7 days, compress
     
@@ -199,6 +204,7 @@ func main() {
         Environment:   "production",
         Level:         "debug",
         AppName:       "my-service",
+        Version:       "2.0.0",
         EnableConsole: true,
         EnableFile:    true,
         FilePath:      "/var/log/my-service/app.log",
@@ -587,6 +593,7 @@ func main() {
         WithEnvironment("production").
         WithLevel("debug").
         WithAppName("my-api").
+        WithVersion("1.0.0").
         WithFile("logs/app.log").
         WithFileRotation(100, 5, 30, true)
 

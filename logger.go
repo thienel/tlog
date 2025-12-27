@@ -76,8 +76,16 @@ func Init(cfg Config) error {
 		zap.AddCallerSkip(1),
 	)
 
+	// Add global fields
+	var globalFields []zap.Field
 	if cfg.AppName != "" {
-		logger = logger.Named(cfg.AppName)
+		globalFields = append(globalFields, zap.String("service", cfg.AppName))
+	}
+	if cfg.Version != "" {
+		globalFields = append(globalFields, zap.String("version", cfg.Version))
+	}
+	if len(globalFields) > 0 {
+		logger = logger.With(globalFields...)
 	}
 
 	globalLogger = logger

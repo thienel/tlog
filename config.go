@@ -12,8 +12,11 @@ type Config struct {
 	// Valid values: "debug", "info", "warn", "error"
 	Level string
 
-	// AppName is used as identifier in structured logs.
+	// AppName is used as the service identifier in structured logs.
 	AppName string
+
+	// Version is the application version for structured logs.
+	Version string
 
 	// File output configuration
 	EnableFile bool   // Enable file output
@@ -46,6 +49,7 @@ func DefaultConfig() Config {
 		Environment:   "development",
 		Level:         "info",
 		AppName:       "app",
+		Version:       "1.0.0",
 		EnableConsole: true,
 		EnableFile:    false,
 		FilePath:      "logs/app.log",
@@ -72,6 +76,12 @@ func (c Config) WithLevel(level string) Config {
 // WithAppName sets the application name.
 func (c Config) WithAppName(name string) Config {
 	c.AppName = name
+	return c
+}
+
+// WithVersion sets the application version.
+func (c Config) WithVersion(version string) Config {
+	c.Version = version
 	return c
 }
 
