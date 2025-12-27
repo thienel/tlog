@@ -3,6 +3,8 @@ package tlog
 import (
 	"context"
 	"errors"
+	"regexp"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -101,6 +103,60 @@ func (l *GormLogger) Error(ctx context.Context, msg string, data ...interface{})
 	}
 }
 
+// parseSQL extracts operation and table name from SQL query.
+func parseSQL(sql string) (operation string, table string) {
+	sql = strings.TrimSpace(sql)
+	upperSQL := strings.ToUpper(sql)
+
+	// Determine operation
+	switch {
+	case strings.HasPrefix(upperSQL, "SELECT"):
+		operation = "SELECT"
+	case strings.HasPrefix(upperSQL, "INSERT"):
+		operation = "INSERT"
+	case strings.HasPrefix(upperSQL, "UPDATE"):
+		operation = "UPDATE"
+	case strings.HasPrefix(upperSQL, "DELETE"):
+		operation = "DELETE"
+	default:
+		operation = "OTHER"
+	}
+
+	// Extract table name based on operation
+	table = extractTableName(sql, operation)
+	return
+}
+
+// extractTableName extracts the table name from SQL based on operation type.
+func extractTableName(sql string, operation string) string {
+	var pattern *regexp.Regexp
+
+	switch operation {
+	case "SELECT":
+		// SELECT ... FROM "table_name" or SELECT ... FROM table_name
+		pattern = regexp.MustCompile(`(?i)\bFROM\s+["` + "`" + `]?(\w+)["` + "`" + `]?`)
+	case "INSERT":
+		// INSERT INTO "table_name" or INSERT INTO table_name
+		pattern = regexp.MustCompile(`(?i)\bINTO\s+["` + "`" + `]?(\w+)["` + "`" + `]?`)
+	case "UPDATE":
+		// UPDATE "table_name" or UPDATE table_name
+		pattern = regexp.MustCompile(`(?i)\bUPDATE\s+["` + "`" + `]?(\w+)["` + "`" + `]?`)
+	case "DELETE":
+		// DELETE FROM "table_name" or DELETE FROM table_name
+		pattern = regexp.MustCompile(`(?i)\bFROM\s+["` + "`" + `]?(\w+)["` + "`" + `]?`)
+	default:
+		return ""
+	}
+
+	if pattern != nil {
+		matches := pattern.FindStringSubmatch(sql)
+		if len(matches) > 1 {
+			return matches[1]
+		}
+	}
+	return ""
+}
+
 // Trace logs SQL queries with timing information.
 func (l *GormLogger) Trace(ctx context.Context, begin time.Time, fc func() (string, int64), err error) {
 	if l.cfg.LogLevel <= gormlogger.Silent {
@@ -110,11 +166,24 @@ func (l *GormLogger) Trace(ctx context.Context, begin time.Time, fc func() (stri
 	elapsed := time.Since(begin)
 	sql, rows := fc()
 
+	// Parse SQL to extract operation and table
+	operation, table := parseSQL(sql)
+
+	// Check if slow query
+	isSlowQuery := elapsed > l.cfg.SlowThreshold
+
 	fields := []zap.Field{
+		zap.String("operation", operation),
+		zap.String("table", table),
+		zap.Int64("duration_ms", elapsed.Milliseconds()),
+		zap.Int64("rows_affected", rows),
 		zap.String("sql", sql),
-		zap.Int64("rows", rows),
-		zap.Duration("elapsed", elapsed),
 		zap.String("caller", utils.FileWithLineNum()),
+	}
+
+	// Add slow_query flag if applicable
+	if isSlowQuery {
+		fields = append(fields, zap.Bool("slow_query", true))
 	}
 
 	logger := FromContext(ctx)
@@ -126,15 +195,14 @@ func (l *GormLogger) Trace(ctx context.Context, begin time.Time, fc func() (stri
 			return
 		}
 		fields = append(fields, zap.Error(err))
-		logger.Error("SQL Error", fields...)
+		logger.Error("Database query failed", fields...)
 
 	// Case 2: Log slow queries
-	case elapsed > l.cfg.SlowThreshold && l.cfg.LogLevel >= gormlogger.Warn:
-		fields = append(fields, zap.Duration("threshold", l.cfg.SlowThreshold))
-		logger.Warn("Slow SQL", fields...)
+	case isSlowQuery && l.cfg.LogLevel >= gormlogger.Warn:
+		logger.Warn("Slow database query detected", fields...)
 
 	// Case 3: Log all queries (Info level)
 	case l.cfg.LogLevel >= gormlogger.Info:
-		logger.Info("SQL", fields...)
+		logger.Info("Database query executed", fields...)
 	}
 }

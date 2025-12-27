@@ -392,11 +392,14 @@ r.Use(tlog.GinMiddleware(
     "request_id": "019405a0-1234-7abc-8def-0123456789ab",
     "method": "POST",
     "path": "/api/users",
-    "status": 200,
-    "latency": "15.234ms",
-    "client_ip": "192.168.1.100",
+    "status_code": 200,
+    "duration_ms": 15,
+    "ip_address": "192.168.1.100",
+    "protocol": "HTTP/1.1",
+    "host": "api.example.com",
     "user_id": 42,
-    "response_size": 256
+    "response_size": 256,
+    "query_string": "page=1"
 }
 ```
 
@@ -406,7 +409,11 @@ r.Use(tlog.GinMiddleware(
     "level": "WARN",
     "message": "Request completed with client error",
     "request_id": "...",
-    "status": 400,
+    "status_code": 400,
+    "duration_ms": 5,
+    "ip_address": "192.168.1.100",
+    "protocol": "HTTP/1.1",
+    "host": "api.example.com",
     "request_body": "{\"name\":\"\"}",
     "response_body": "{\"error\":\"name is required\"}"
 }
@@ -521,10 +528,12 @@ db, _ := gorm.Open(postgres.Open(dsn), &gorm.Config{
 **Normal Query (Info level):**
 ```json
 {
-    "message": "SQL",
+    "message": "Database query executed",
+    "operation": "SELECT",
+    "table": "users",
+    "duration_ms": 1,
+    "rows_affected": 1,
     "sql": "SELECT * FROM users WHERE id = 1",
-    "rows": 1,
-    "elapsed": "1.234ms",
     "caller": "user_repository.go:42",
     "request_id": "req-abc-123"
 }
@@ -534,11 +543,13 @@ db, _ := gorm.Open(postgres.Open(dsn), &gorm.Config{
 ```json
 {
     "level": "WARN",
-    "message": "Slow SQL",
+    "message": "Slow database query detected",
+    "operation": "SELECT",
+    "table": "orders",
+    "duration_ms": 523,
+    "rows_affected": 10000,
+    "slow_query": true,
     "sql": "SELECT * FROM orders WHERE created_at > ?",
-    "rows": 10000,
-    "elapsed": "523.456ms",
-    "threshold": "200ms",
     "caller": "order_repository.go:78"
 }
 ```
@@ -547,7 +558,11 @@ db, _ := gorm.Open(postgres.Open(dsn), &gorm.Config{
 ```json
 {
     "level": "ERROR",
-    "message": "SQL Error",
+    "message": "Database query failed",
+    "operation": "INSERT",
+    "table": "users",
+    "duration_ms": 5,
+    "rows_affected": 0,
     "sql": "INSERT INTO users (email) VALUES (?)",
     "error": "duplicate key value violates unique constraint",
     "caller": "user_repository.go:25"

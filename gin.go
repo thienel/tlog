@@ -145,6 +145,8 @@ func GinMiddleware(opts ...GinOptionFunc) gin.HandlerFunc {
 		method := c.Request.Method
 		clientIP := c.ClientIP()
 		userAgent := c.Request.UserAgent()
+		protocol := c.Request.Proto
+		host := c.Request.Host
 
 		// Read request body for non-GET requests (for error debugging)
 		var requestBody string
@@ -197,13 +199,15 @@ func GinMiddleware(opts ...GinOptionFunc) gin.HandlerFunc {
 			zap.String("request_id", requestID),
 			zap.String("method", method),
 			zap.String("path", path),
-			zap.Int("status", statusCode),
-			zap.Duration("latency", latency),
-			zap.String("client_ip", clientIP),
+			zap.Int("status_code", statusCode),
+			zap.Int64("duration_ms", latency.Milliseconds()),
+			zap.String("ip_address", clientIP),
+			zap.String("protocol", protocol),
+			zap.String("host", host),
 		}
 
 		if query != "" {
-			logFields = append(logFields, zap.String("query", query))
+			logFields = append(logFields, zap.String("query_string", query))
 		}
 
 		if userID > 0 {
