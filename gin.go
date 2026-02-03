@@ -2,13 +2,18 @@ package tlog
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
+	"regexp"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
+
+// DefaultMaskValue is the default replacement for masked fields.
+const DefaultMaskValue = "******"
 
 // GinConfig contains configuration for the Gin middleware.
 type GinConfig struct {
@@ -34,6 +39,10 @@ type GinConfig struct {
 	// UseUUIDv7 uses UUID v7 (time-ordered) for request IDs.
 	// Default: true
 	UseUUIDv7 bool
+
+	// MaskPatterns is a list of compiled regex patterns for field names to mask.
+	// Values of fields whose names match any pattern will be replaced with "******".
+	MaskPatterns []*regexp.Regexp
 }
 
 // DefaultGinConfig returns a GinConfig with sensible defaults.
@@ -91,6 +100,80 @@ func WithUUIDv7(enabled bool) GinOptionFunc {
 	return func(c *GinConfig) {
 		c.UseUUIDv7 = enabled
 	}
+}
+
+// WithMaskPatterns sets regex patterns for field names to mask in request/response bodies.
+// Values of JSON fields whose names match any pattern will be replaced with "******".
+// Example: WithMaskPatterns(`(?i)password`, `(?i)secret`, `(?i)token`)
+func WithMaskPatterns(patterns ...string) GinOptionFunc {
+	return func(c *GinConfig) {
+		c.MaskPatterns = make([]*regexp.Regexp, 0, len(patterns))
+		for _, p := range patterns {
+			if re, err := regexp.Compile(p); err == nil {
+				c.MaskPatterns = append(c.MaskPatterns, re)
+			}
+		}
+	}
+}
+
+// maskJSONFields masks values of fields whose names match any of the mask patterns.
+// It recursively processes nested objects and arrays.
+func maskJSONFields(data any, patterns []*regexp.Regexp) any {
+	if len(patterns) == 0 {
+		return data
+	}
+
+	switch v := data.(type) {
+	case map[string]any:
+		result := make(map[string]any, len(v))
+		for key, val := range v {
+			if shouldMask(key, patterns) {
+				result[key] = DefaultMaskValue
+			} else {
+				result[key] = maskJSONFields(val, patterns)
+			}
+		}
+		return result
+	case []any:
+		result := make([]any, len(v))
+		for i, item := range v {
+			result[i] = maskJSONFields(item, patterns)
+		}
+		return result
+	default:
+		return data
+	}
+}
+
+// shouldMask checks if a field name matches any of the mask patterns.
+func shouldMask(fieldName string, patterns []*regexp.Regexp) bool {
+	for _, p := range patterns {
+		if p.MatchString(fieldName) {
+			return true
+		}
+	}
+	return false
+}
+
+// maskBody parses JSON body and masks sensitive fields, returning the masked JSON string.
+// If parsing fails, returns the original body unchanged.
+func maskBody(body string, patterns []*regexp.Regexp) string {
+	if len(patterns) == 0 || body == "" {
+		return body
+	}
+
+	var data any
+	if err := json.Unmarshal([]byte(body), &data); err != nil {
+		return body
+	}
+
+	masked := maskJSONFields(data, patterns)
+	result, err := json.Marshal(masked)
+	if err != nil {
+		return body
+	}
+
+	return string(result)
 }
 
 // responseWriter wraps gin.ResponseWriter to capture response body.
@@ -227,11 +310,13 @@ func GinMiddleware(opts ...GinOptionFunc) gin.HandlerFunc {
 				if len(responseBody) > cfg.MaxBodyLogSize {
 					responseBody = responseBody[:cfg.MaxBodyLogSize] + "...[truncated]"
 				}
+				responseBody = maskBody(responseBody, cfg.MaskPatterns)
 				logFields = append(logFields, zap.String("response_body", responseBody))
 			}
 
 			if cfg.LogRequestBody && requestBody != "" {
-				logFields = append(logFields, zap.String("request_body", requestBody))
+				maskedRequestBody := maskBody(requestBody, cfg.MaskPatterns)
+				logFields = append(logFields, zap.String("request_body", maskedRequestBody))
 			}
 		}
 
