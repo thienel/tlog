@@ -9,6 +9,7 @@ A reusable Go logging package built on [Zap](https://github.com/uber-go/zap), wi
 - **Environment-aware**: Development (colored console) and production (JSON) modes
 - **Context-aware**: Request tracing with `request_id`, `user_id`, `trace_id`
 - **Gin Middleware**: Request logging with body capture on errors
+- **Sensitive Field Masking**: Regex-based masking for sensitive data in request/response bodies
 - **GORM Adapter**: SQL logging with slow query detection
 - **Vietnam Timezone**: Default timezone set to UTC+7
 
@@ -317,12 +318,13 @@ func main() {
 
 ```go
 type GinConfig struct {
-    RequestIDHeader string   // Header name for request ID (default: "X-Request-ID")
-    MaxBodyLogSize  int      // Max body size to log (default: 4096 bytes)
-    LogRequestBody  bool     // Log request body on errors (default: true)
-    LogResponseBody bool     // Log response body on errors (default: true)
-    SkipPaths       []string // Paths to skip logging
-    UseUUIDv7       bool     // Use UUID v7 for request IDs (default: true)
+    RequestIDHeader string           // Header name for request ID (default: "X-Request-ID")
+    MaxBodyLogSize  int              // Max body size to log (default: 4096 bytes)
+    LogRequestBody  bool             // Log request body on errors (default: true)
+    LogResponseBody bool             // Log response body on errors (default: true)
+    SkipPaths       []string         // Paths to skip logging
+    UseUUIDv7       bool             // Use UUID v7 for request IDs (default: true)
+    MaskPatterns    []*regexp.Regexp // Regex patterns for field names to mask
 }
 ```
 
@@ -369,6 +371,59 @@ r.Use(tlog.GinMiddleware(
     tlog.WithUUIDv7(true),
 ))
 ```
+
+### Sensitive Field Masking
+
+Mask sensitive fields in request/response bodies using regex patterns. Values of JSON fields whose names match any pattern will be replaced with `******`.
+
+```go
+// Mask common sensitive fields
+r.Use(tlog.GinMiddleware(
+    tlog.WithMaskPatterns(
+        `(?i)password`,      // matches "password", "Password", "PASSWORD"
+        `(?i)secret`,        // matches "secret", "Secret", etc.
+        `(?i)token`,         // matches "token", "accessToken", etc.
+        `(?i)api[_-]?key`,   // matches "api_key", "apiKey", "API-KEY"
+        `(?i)authorization`, // matches "authorization" header values
+        `(?i)credit[_-]?card`, // matches "credit_card", "creditCard"
+    ),
+))
+```
+
+**Example - Before masking:**
+```json
+{
+    "username": "john",
+    "password": "secret123",
+    "profile": {
+        "api_key": "sk-1234567890",
+        "settings": {
+            "secret_token": "abc-xyz"
+        }
+    }
+}
+```
+
+**Example - After masking (logged output):**
+```json
+{
+    "username": "john",
+    "password": "******",
+    "profile": {
+        "api_key": "******",
+        "settings": {
+            "secret_token": "******"
+        }
+    }
+}
+```
+
+**Features:**
+- Supports regex patterns for flexible field name matching
+- Recursively masks nested objects and arrays
+- Only applies to JSON bodies (non-JSON bodies are logged unchanged)
+- No performance impact when no patterns are configured
+- Masking is applied to both request and response bodies
 
 ### What the Middleware Logs
 
@@ -633,6 +688,7 @@ func main() {
     r.Use(gin.Recovery())
     r.Use(tlog.GinMiddleware(
         tlog.WithSkipPaths("/health"),
+        tlog.WithMaskPatterns(`(?i)password`, `(?i)token`, `(?i)secret`),
     ))
 
     // Health check
